@@ -59,6 +59,7 @@ class Agent:
 
         self.LOG_FILES = os.path.join(RUNS_DIR, f"{self.param_set}.log")
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"{self.param_set}.pt")
+        self.STATS_FILE = os.path.join(RUNS_DIR, f"{self.param_set}_stats.csv")
 
 
     def _create_network(self, num_states, num_actions):
@@ -67,7 +68,7 @@ class Agent:
         return DQN(num_states, num_actions).to(device)
 
 
-    def run(self, is_training = True, render = False):
+    def run(self, is_training = True, render = False, episodes = None):
 
         env = gym.make(self.env_id, render_mode="human" if render else None)
 
@@ -91,6 +92,11 @@ class Agent:
             best_reward = float("-inf")
             reward_history = deque(maxlen=100)
 
+            # Initialize stats CSV header if not exists
+            if not os.path.exists(self.STATS_FILE):
+                with open(self.STATS_FILE, "w") as f:
+                    f.write("episode,reward,avg_reward_100,epsilon,loss\n")
+
         else:
             # Load trained policy for evaluation
             if not os.path.exists(self.MODEL_FILE):
@@ -98,11 +104,14 @@ class Agent:
             policy_dqn.load_state_dict(torch.load(self.MODEL_FILE, map_location=device))
             policy_dqn.eval()
 
+        episode_iterator = range(episodes) if episodes is not None else itertools.count()
+
         try:
-            for episode in itertools.count():
+            for episode in episode_iterator:
 
                 state, _ = env.reset()
                 episode_reward = 0
+                episode_losses = []
                 terminated = False
                 truncated = False
 
@@ -127,7 +136,8 @@ class Agent:
                         # Train every step once replay buffer has sufficient warm-up transitions
                         if len(memory) >= self.min_replay_size:
                             mini_batch = memory.sample(self.mini_batch_size)
-                            self.optimize(mini_batch, policy_dqn, target_dqn)
+                            loss = self.optimize(mini_batch, policy_dqn, target_dqn)
+                            episode_losses.append(loss)
 
                             # Periodically sync target network with policy network
                             if total_steps % self.network_sync_rate == 0:
@@ -142,6 +152,7 @@ class Agent:
 
                     reward_history.append(episode_reward)
                     avg_reward_100 = sum(reward_history) / len(reward_history)
+                    mean_loss = sum(episode_losses) / len(episode_losses) if episode_losses else 0.0
 
                     if episode_reward > best_reward:
                         log_msg = f"best reward = {episode_reward} for episode = {episode+1}"
@@ -151,9 +162,13 @@ class Agent:
                         torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
                         best_reward = episode_reward
 
+                    # Record stats to CSV
+                    with open(self.STATS_FILE, "a") as f:
+                        f.write(f"{episode+1},{episode_reward:.2f},{avg_reward_100:.2f},{epsilon:.4f},{mean_loss:.4f}\n")
+
                     # Log progress
                     status = "TRAINING" if len(memory) >= self.min_replay_size else f"WARMUP ({len(memory)}/{self.min_replay_size})"
-                    print(f"episode={episode+1}, reward={episode_reward:.2f}, avg_100={avg_reward_100:.2f}, epsilon={epsilon:.4f}, [{status}]")
+                    print(f"episode={episode+1}, reward={episode_reward:.2f}, avg_100={avg_reward_100:.2f}, epsilon={epsilon:.4f}, loss={mean_loss:.4f}, [{status}]")
 
                 else:
                     print(f"episode={episode+1}, reward={episode_reward:.2f}")
@@ -198,13 +213,15 @@ class Agent:
 if __name__ == "__main__":
     # parse command line inputs
     parser = argparse.ArgumentParser(description = 'Train or test model.')
-    parser.add_argument('hyperparameters', help = '')
+    parser.add_argument('hyperparameters', help = 'Hyperparameter profile name from parameters.yaml')
     parser.add_argument('--train', help = 'Training mode', action = 'store_true')
+    parser.add_argument('--episodes', help = 'Number of episodes to run (default: infinite)', type = int, default = None)
+    parser.add_argument('--no-render', help = 'Disable rendering in evaluation mode', action = 'store_true')
     args = parser.parse_args()
 
     dql = Agent(param_set = args.hyperparameters)
 
     if args.train:
-        dql.run(is_training = True)
+        dql.run(is_training = True, episodes = args.episodes)
     else:
-        dql.run(is_training = False, render = True)
+        dql.run(is_training = False, render = not args.no_render, episodes = args.episodes)
