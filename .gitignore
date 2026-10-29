@@ -14,3 +14,8 @@ env/
 # Evaluation videos & artifacts
 runs/videos/
 *.png
+
+# Training logs & telemetry
+runs/*.log
+runs/flappybirdv0.log
+runs/*_stats.csv
