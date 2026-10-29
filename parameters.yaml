@@ -1,5 +1,7 @@
+# Standard DQN Profile (matches existing checkpoint in runs/flappybirdv0.pt)
 flappybirdv0:
   env_id: FlappyBird-v0
+  network_type: standard  # "standard" or "dueling"
   epsilon_init: 1.0       # initial epsilon (100% exploration)
   epsilon_min: 0.05       # minimum exploration rate
   epsilon_decay: 0.995    # decay rate per episode after warm-up
@@ -10,3 +12,18 @@ flappybirdv0:
   alpha: 0.0005           # learning rate for Adam optimizer
   gamma: 0.99             # discount factor for future rewards
   reward_threshold: 1000  # maximum reward threshold
+
+# Dueling DQN Profile (decoupled State-Value and Advantage streams)
+flappybird_dueling:
+  env_id: FlappyBird-v0
+  network_type: dueling   # "standard" or "dueling"
+  epsilon_init: 1.0
+  epsilon_min: 0.05
+  epsilon_decay: 0.995
+  replay_memory_size: 100000
+  min_replay_size: 1000
+  mini_batch_size: 32
+  network_sync_rate: 1000
+  alpha: 0.0005
+  gamma: 0.99
+  reward_threshold: 1000

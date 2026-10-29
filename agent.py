@@ -11,7 +11,7 @@ import os
 from collections import deque
 import numpy as np
 
-from dqn import DQN
+from dqn import DQN, DuelingDQN
 from experience_replay import ReplayMemory
 
 
@@ -38,6 +38,7 @@ class Agent:
             params = all_param_set[param_set]
 
         self.env_id = params.get("env_id", "FlappyBird-v0")
+        self.network_type = params.get("network_type", "standard").lower()
         self.alpha = params["alpha"]
         self.gamma = params["gamma"]
 
@@ -60,6 +61,12 @@ class Agent:
         self.MODEL_FILE = os.path.join(RUNS_DIR, f"{self.param_set}.pt")
 
 
+    def _create_network(self, num_states, num_actions):
+        if self.network_type == "dueling":
+            return DuelingDQN(num_states, num_actions).to(device)
+        return DQN(num_states, num_actions).to(device)
+
+
     def run(self, is_training = True, render = False):
 
         env = gym.make(self.env_id, render_mode="human" if render else None)
@@ -67,13 +74,15 @@ class Agent:
         num_states = env.observation_space.shape[0]    # input dim
         num_actions = env.action_space.n               # output dim
 
-        policy_dqn = DQN(num_states, num_actions).to(device)
+        print(f"[{'TRAINING' if is_training else 'EVALUATION'}] Architecture: {self.network_type.upper()} DQN | Device: {device}")
+
+        policy_dqn = self._create_network(num_states, num_actions)
 
         if is_training:
             memory = ReplayMemory(self.replay_memory_size)
             epsilon = self.epsilon_init
 
-            target_dqn = DQN(num_states, num_actions).to(device)
+            target_dqn = self._create_network(num_states, num_actions)
             target_dqn.load_state_dict(policy_dqn.state_dict())
             target_dqn.eval()
 
