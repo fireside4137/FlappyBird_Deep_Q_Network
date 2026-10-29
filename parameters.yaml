@@ -1,16 +1,12 @@
 flappybirdv0:
-  env_id : FlappyBird-v0
-  epsilon_init: 1   # initial epsilon
-  epsilon_min: 0.05 # decay until this epsilon value
-  epsilon_decay: 0.995 # decay rate
-  replay_memory_size: 100000
-  mini_batch_size: 32  # batch size of experience samples
-  network_sync_rate: 10 
-  alpha: 0.001
-  gamma: 0.99
-  reward_threshold: 1000  # max reward after which model will stop training.
-
-
-
-# network sync rate is the number of steps after which the Target network is synced with the Policy network.
-# at every 10 steps, the target network gets the values of parameters from policy network.
+  env_id: FlappyBird-v0
+  epsilon_init: 1.0       # initial epsilon (100% exploration)
+  epsilon_min: 0.05       # minimum exploration rate
+  epsilon_decay: 0.995    # decay rate per episode after warm-up
+  replay_memory_size: 100000 # max capacity of replay memory
+  min_replay_size: 1000   # initial random transitions before training starts
+  mini_batch_size: 32     # batch size for gradient updates
+  network_sync_rate: 1000 # steps between target network updates
+  alpha: 0.0005           # learning rate for Adam optimizer
+  gamma: 0.99             # discount factor for future rewards
+  reward_threshold: 1000  # maximum reward threshold
