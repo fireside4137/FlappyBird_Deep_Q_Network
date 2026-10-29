@@ -63,6 +63,14 @@ def evaluate(param_set, episodes=10, record=False, render=True, model_path=None)
 
     # Render mode selection
     if record:
+        try:
+            import moviepy
+        except ImportError:
+            print("\n[ERROR] MoviePy is required for recording playthrough videos.")
+            print("Please install it in your active environment by running:")
+            print("    pip install moviepy\n")
+            return [], []
+
         os.makedirs(VIDEO_DIR, exist_ok=True)
         env = gym.make(env_id, render_mode="rgb_array")
         # Record all evaluation episodes
