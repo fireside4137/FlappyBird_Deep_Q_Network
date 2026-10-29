@@ -75,6 +75,7 @@ class Agent:
             target_dqn = DQN(num_states, num_actions).to(device)
             # copy the wt and bias vals from policy to target
             target_dqn.load_state_dict(policy_dqn.state_dict())
+            target_dqn.eval()
 
             steps = 0
 
@@ -84,70 +85,77 @@ class Agent:
 
         else :
             # best policy load
-            policy_dqn.load_state_dict(torch.load(self.MODEL_FILE))
+            if not os.path.exists(self.MODEL_FILE):
+                raise FileNotFoundError(f"Model file '{self.MODEL_FILE}' not found. Please train the model first.")
+            policy_dqn.load_state_dict(torch.load(self.MODEL_FILE, map_location=device))
             policy_dqn.eval()
 
-        for episode in itertools.count():
+        try:
+            for episode in itertools.count():
 
-            state, _ = env.reset()
-            state = torch.tensor(state, dtype = torch.float, device = device)
+                state, _ = env.reset()
+                state = torch.tensor(state, dtype = torch.float, device = device)
 
-            episode_reward = 0
-            terminated = False
+                episode_reward = 0
+                terminated = False
+                truncated = False
 
-            while (not terminated and episode_reward < self.reward_threshold):
-                # Next action:
-                if is_training and random.random() < epsilon:
-                    action = env.action_space.sample() # explore
-                    action = torch.tensor(action, dtype = torch.long, device = device)
-                else:
-                    with torch.no_grad():
-                        action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax() # exploit
+                while not (terminated or truncated) and episode_reward < self.reward_threshold:
+                    # Next action:
+                    if is_training and random.random() < epsilon:
+                        action = env.action_space.sample() # explore
+                        action = torch.tensor(action, dtype = torch.long, device = device)
+                    else:
+                        with torch.no_grad():
+                            action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax() # exploit
 
 
-                # Processing: terminated = done
-                next_state, reward, terminated, _, _ = env.step(action.item())
-                episode_reward += reward
+                    # Processing: terminated = done
+                    next_state, reward, terminated, truncated, _ = env.step(action.item())
+                    episode_reward += reward
 
-                # create tensors
-                reward = torch.tensor(reward, dtype=torch.float, device = device)
-                next_state = torch.tensor(next_state, dtype=torch.float, device = device)
+                    # create tensors
+                    reward = torch.tensor(reward, dtype=torch.float, device = device)
+                    next_state = torch.tensor(next_state, dtype=torch.float, device = device)
+
+                    if is_training:
+                        memory.append((state, action, next_state, reward, terminated))
+                        steps += 1
+
+                    state = next_state
 
                 if is_training:
-                    memory.append((state, action, next_state, reward, terminated))
-                    steps += 1
+                    # epsilon decay 
+                    epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
 
-                state = next_state
+                    if episode_reward > best_reward:
+                        log_msg = f"best reward = {episode_reward} for episode = {episode+1}"
 
-        if is_training:
-            print(f"episode={episode+1}, reward={episode_reward}, epsilon={epsilon}")
-        else:
-            print(f"episode={episode+1}, reward={episode_reward}")
+                        with open(self.LOG_FILES, "a") as f:
+                            f.write(log_msg + "\n")
 
-            if is_training:
-            # epsilon decay 
-                epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
+                        torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
+                        best_reward = episode_reward
 
-                if episode_reward > best_reward:
-                    log_msg = f"best reward = {episode_reward} for episode = {episode+1}"
+                    print(f"episode={episode+1}, reward={episode_reward:.2f}, epsilon={epsilon:.4f}")
 
-                    with open(self.LOG_FILES, "a") as f:
-                        f.write(log_msg + "\n")
+                    if len(memory) > self.mini_batch_size:
+                        # get samples
+                        mini_batch = memory.sample(self.mini_batch_size)
 
-                    torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
-                    best_reward = episode_reward
+                        self.optimize(mini_batch, policy_dqn, target_dqn)
 
-            if is_training and len(memory) > self.mini_batch_size:
-                # get samples
-                mini_batch = memory.sample(self.mini_batch_size)
+                        # sync the network
+                        if steps > self.network_sync_rate:
+                            target_dqn.load_state_dict(policy_dqn.state_dict())
+                            steps = 0
+                else:
+                    print(f"episode={episode+1}, reward={episode_reward:.2f}")
 
-                self.optimize(mini_batch, policy_dqn, target_dqn)
-
-                # sync the network
-                if steps > self.network_sync_rate:
-                    target_dqn.load_state_dict(policy_dqn.state_dict())
-                    steps = 0
-        # env.close() - manually stopping the game, no need for .close()
+        except KeyboardInterrupt:
+            print("\nStopped by user.")
+        finally:
+            env.close()
 
 
     def optimize(self, mini_batch, policy_dqn, target_dqn):
@@ -180,15 +188,15 @@ class Agent:
         actions = torch.stack(actions)
         next_states = torch.stack(next_states)
         rewards = torch.stack(rewards)
-        terminations = torch.tensor(terminations).float().to(device)
+        terminations = torch.tensor(terminations, dtype=torch.float, device=device)
 
         # calculate target Q-values - if terminations = true => zero
         # if terminations = true, => 1-1 = 0, and everything becomes zero, else everyting runs.
         with torch.no_grad():
-            target_q = rewards +(1-terminations) * self.gamma * target_dqn(next_states).max(dim=1)[0]
+            target_q = rewards + (1 - terminations) * self.gamma * target_dqn(next_states).max(dim=1)[0]
 
         # calculate y_pred i.e. Q-value from current policy
-        current_q = policy_dqn(states).gather(dim = 1, index = actions.unsqueeze(dim = 1)).squeeze()
+        current_q = policy_dqn(states).gather(dim=1, index=actions.unsqueeze(dim=1)).squeeze(-1)
 
         # compute loss
         loss = self.loss_fn(current_q, target_q)
